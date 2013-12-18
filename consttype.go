@@ -8,6 +8,7 @@ type ConstType interface {
 	reflect.Type
 	IsIntegral() bool
 	IsReal() bool
+	IsNumeric() bool
 }
 
 type ConstIntType struct { reflect.Type }
@@ -51,6 +52,14 @@ func (ConstComplexType) IsReal() bool { return false }
 func (ConstStringType) IsReal() bool { return false }
 func (ConstNilType) IsReal() bool { return false }
 func (ConstBoolType) IsReal() bool { return false }
+
+func (ConstIntType) IsNumeric() bool { return true }
+func (ConstRuneType) IsNumeric() bool { return true }
+func (ConstFloatType) IsNumeric() bool { return true }
+func (ConstComplexType) IsNumeric() bool { return true }
+func (ConstStringType) IsNumeric() bool { return false }
+func (ConstNilType) IsNumeric() bool { return false }
+func (ConstBoolType) IsNumeric() bool { return false }
 
 // Returns the ConstType of a binary, non-boolean, expression invalving const types of
 // x and y.
@@ -235,5 +244,25 @@ func convertConstToTyped(ctx *Ctx, from ConstType, c constValue, to reflect.Type
 	}
 
 	return constValue{}, []error{ErrBadConstConversion{at(ctx, expr), from, to, reflect.Value(c)}}
+}
+
+// Convert a typed numeric value to a const number. Ok is false if v is not numeric
+func convertTypedToConstNumber(v reflect.Value) (_ *ConstNumber, ok bool) {
+	switch v.Type().Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return NewConstInt64(v.Int()), true
+
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return NewConstUint64(v.Uint()), true
+
+	case reflect.Float32, reflect.Float64:
+		return NewConstFloat64(v.Float()), true
+
+	case reflect.Complex64, reflect.Complex128:
+		return NewConstComplex128(v.Complex()), true
+
+	default:
+		return nil, false
+	}
 }
 

@@ -243,45 +243,59 @@ func (err ErrInvalidUnaryOperation) Error() string {
 
 func (err ErrInvalidBinaryOperation) Error() string {
 	binary := err.ErrorContext.Node.(*BinaryExpr)
+	op := binary.Op
 	x := binary.X.(Expr)
 	y := binary.Y.(Expr)
 
 	xt := x.KnownType()[0]
 	yt := y.KnownType()[0]
 
+	xct, xcok := xt.(ConstType)
+	yct, ycok := yt.(ConstType)
+
 	xn, xnok := x.Const().Interface().(*ConstNumber)
 	yn, ynok := y.Const().Interface().(*ConstNumber)
 
-	xq := quoteString(x.Const().Interface())
-	yq := quoteString(y.Const().Interface())
+	if xcok && ycok {
 
-	// For whatever reason, gc errors don't show +0i in constant expressions
-	xq = drop0i(xq)
-	yq = drop0i(yq)
-
-	if xnok && ynok {
-		switch binary.Op {
-		case token.REM:
-			if xn.Type.IsReal() && yn.Type.IsReal() {
-				return "illegal constant expression: floating-point % operation"
+		if xnok && ynok {
+			switch op {
+			case token.REM:
+				if xn.Type.IsReal() && yn.Type.IsReal() {
+					return "illegal constant expression: floating-point % operation"
+				}
 			}
+			return fmt.Sprintf("illegal constant expression: ideal %v ideal", op)
+		} else if xt == yt {
+			// const nil value prints as <T>, as an operand we should print nil
+			var operandType interface{}
+			if xt == ConstNil {
+				operandType = "nil"
+			} else {
+				operandType = xt
+			}
+			return fmt.Sprintf("invalid operation: %v %v %v (operator %v not defined on %v)",
+				x, op, y, op, operandType)
 		}
-		return fmt.Sprintf("illegal constant expression: ideal %v ideal", binary.Op)
-	} else if xt == yt {
-		// const nil value prints as <T>, as an operand we should print nil
-		var operandType interface{}
-		if xt == ConstNil {
-			operandType = "nil"
-		} else {
-			operandType = xt
+	} else if xcok {
+		if !isOpDefinedOn(op, yt) && xnok {
+			// The gc implementation re-types nodes in const expressions, so that both sides
+			// have type yt. We don't do this, so we will have to make the conversion again.
+			// Runes get printed out verbatim
+			xx, _ := convertConstToTyped(&Ctx{}, xct, constValue(x.Const()), yt, y)
+			return fmt.Sprintf("invalid operation: %v %v %v (operator %v not defined on %v)",
+				sprintConstValue(reflect.Value(xx), false), op, y, op, yt)
 		}
-		return fmt.Sprintf("invalid operation: %v %v %v (operator %v not defined on %v)",
-			xq, binary.Op, yq, binary.Op, operandType)
-	} else {
-		return fmt.Sprintf("invalid operation: %v %v %v (mismatched types %v and %v)",
-			xq, binary.Op, yq, x.KnownType()[0], y.KnownType()[0],
-		)
+	} else if ycok {
+		if !isOpDefinedOn(op, xt) && ynok {
+			yy, _ := convertConstToTyped(&Ctx{}, yct, constValue(y.Const()), xt, x)
+			return fmt.Sprintf("invalid operation: %v %v %v (operator %v not defined on %v)",
+				x, op, sprintConstValue(reflect.Value(yy), false), op, xt)
+		}
 	}
+	return fmt.Sprintf("invalid operation: %v %v %v (mismatched types %v and %v)",
+		x, op, y, x.KnownType()[0], y.KnownType()[0],
+	)
 }
 
 func (err ErrDivideByZero) Error() string {

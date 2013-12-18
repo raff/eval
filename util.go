@@ -139,3 +139,51 @@ func isBooleanOp(op token.Token) bool {
 		return false
 	}
 }
+
+func isOpDefinedOn(op token.Token, t reflect.Type) bool {
+	if _, ok := t.(ConstNilType); ok {
+		return false
+	}
+
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		switch op {
+		case token.ADD, token.SUB, token.MUL, token.QUO,
+			token.REM, token.AND, token.OR, token.XOR, token.AND_NOT,
+			token.EQL, token.NEQ,
+			token.LEQ, token.GEQ, token.LSS, token.GTR:
+			return true
+		}
+
+		case reflect.Float32, reflect.Float64:
+		switch op {
+		case token.ADD, token.SUB, token.MUL, token.QUO,
+			token.EQL, token.NEQ,
+			token.LEQ, token.GEQ, token.LSS, token.GTR:
+			return true
+		}
+
+		case reflect.Complex64, reflect.Complex128:
+		switch op {
+		case token.ADD, token.SUB, token.MUL, token.QUO,
+			token.EQL, token.NEQ:
+			return true
+		}
+
+		case reflect.Bool:
+		switch op {
+		case token.ADD, token.SUB, token.MUL, token.QUO,
+			token.LAND, token.LOR, token.EQL, token.NEQ:
+			return true
+		}
+
+		case reflect.String:
+		switch op {
+		case token.ADD, token.EQL, token.NEQ, token.LEQ, token.GEQ, token.LSS, token.GTR:
+			return true
+		}
+	}
+	return false
+}
+
