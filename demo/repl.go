@@ -21,7 +21,8 @@ import (
 	"os"
 	"reflect"
 
-	"github.com/0xfaded/eval"
+	//"github.com/0xfaded/eval"
+	"../../eval"
 	"github.com/gobs/readline"
 )
 
@@ -47,6 +48,7 @@ func REPL(env *eval.Env) {
 	// interactively
 	results := make([] interface{}, 0, 10)
 	env.Vars["results"] = reflect.ValueOf(&results)
+        env.Vars["env"] = reflect.ValueOf(&env)
 
 	exprs := 0
 	prompt := "go> "
