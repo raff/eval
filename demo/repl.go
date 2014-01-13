@@ -21,9 +21,8 @@ import (
 	"os"
 	"reflect"
 
-	//"github.com/0xfaded/eval"
-	"../../eval"
-	"github.com/gobs/readline"
+	"github.com/raff/eval"
+	"github.com/gobs/cmd"
 )
 
 func intro_text() {
@@ -41,81 +40,66 @@ To quit, enter: "quit" or Ctrl-D (EOF).
 
 }
 
-// REPL is the a read, eval, and print loop.
-func REPL(env *eval.Env) {
+var (
+	commander = &cmd.Cmd{
+		Prompt:      "go> ",
+		HistoryFile: ".replhistory",
+		PreLoop:     intro_text,
+		Default:     evalCmd,
+		EnableShell: true,
+	}
 
-	// A place to store result values of expressions entered
-	// interactively
-	results := make([] interface{}, 0, 10)
-	env.Vars["results"] = reflect.ValueOf(&results)
-        env.Vars["env"] = reflect.ValueOf(&env)
+	env     = makeEnv()
+	results = make([]interface{}, 0, 10)
+)
 
-	exprs := 0
-	prompt := "go> "
-
-	for {
-		result := readline.ReadLine(&prompt)
-		if result == nil {
-			// EOF
-			break
+func evalCmd(line string) {
+	ctx := &eval.Ctx{line}
+	if expr, err := parser.ParseExpr(line); err != nil {
+		if pair := eval.FormatErrorPos(line, err.Error()); len(pair) == 2 {
+			fmt.Println(pair[0])
+			fmt.Println(pair[1])
 		}
-
-		line := *result
-		if line == "quit" {
-			break
+		fmt.Printf("parse error: %s\n", err)
+	} else if cexpr, errs := eval.CheckExpr(ctx, expr, env); len(errs) != 0 {
+		for _, cerr := range errs {
+			fmt.Printf("%v\n", cerr)
 		}
-
-		if line == "" {
-			continue
-		}
-
-		ctx := &eval.Ctx{line}
-		if expr, err := parser.ParseExpr(line); err != nil {
-			if pair := eval.FormatErrorPos(line, err.Error()); len(pair) == 2 {
-				fmt.Println(pair[0])
-				fmt.Println(pair[1])
-			}
-			fmt.Printf("parse error: %s\n", err)
-		} else if cexpr, errs := eval.CheckExpr(ctx, expr, env); len(errs) != 0 {
-			for _, cerr := range errs {
-				fmt.Printf("%v\n", cerr)
-			}
-		} else if vals, _, err := eval.EvalExpr(ctx, cexpr, env); err != nil {
-			fmt.Printf("eval error: %s\n", err)
-		} else if vals == nil {
-			fmt.Printf("Kind=nil\nnil\n")
-		} else if len(*vals) == 0 {
-			fmt.Printf("Kind=Slice\nvoid\n")
-		} else if len(*vals) == 1 {
-			value := (*vals)[0]
-			if value.IsValid() {
-				kind := value.Kind().String()
-				typ  := value.Type().String()
-				if typ != kind {
-					fmt.Printf("Kind = %v\n", kind)
-					fmt.Printf("Type = %v\n", typ)
-				} else {
-					fmt.Printf("Kind = Type = %v\n", kind)
-				}
-				fmt.Printf("results[%d] = %s\n", exprs, eval.Inspect(value))
-				exprs += 1
-				results = append(results, (*vals)[0].Interface())
+	} else if vals, _, err := eval.EvalExpr(ctx, cexpr, env); err != nil {
+		fmt.Printf("eval error: %s\n", err)
+	} else if vals == nil {
+		fmt.Printf("Kind=nil\nnil\n")
+	} else if len(*vals) == 0 {
+		fmt.Printf("Kind=Slice\nvoid\n")
+	} else if len(*vals) == 1 {
+		value := (*vals)[0]
+		if value.IsValid() {
+			kind := value.Kind().String()
+			typ := value.Type().String()
+			if typ != kind {
+				fmt.Printf("Kind = %v\n", kind)
+				fmt.Printf("Type = %v\n", typ)
 			} else {
-				fmt.Printf("%s\n", value)
+				fmt.Printf("Kind = Type = %v\n", kind)
 			}
-		} else {
-			fmt.Printf("Kind = Multi-Value\n")
-			size := len(*vals)
-			for i, v := range *vals {
-				fmt.Printf("%s", eval.Inspect(v))
-				if i < size-1 { fmt.Printf(", ") }
-			}
-			fmt.Printf("\n")
-			exprs += 1
-			results = append(results, (*vals))
-		}
 
-		readline.AddHistory(line)
+			n := len(results)
+			results = append(results, (*vals)[0].Interface())
+			fmt.Printf("results[%d] = %s\n", n, eval.Inspect(value))
+		} else {
+			fmt.Printf("%s\n", value)
+		}
+	} else {
+		fmt.Printf("Kind = Multi-Value\n")
+		size := len(*vals)
+		for i, v := range *vals {
+			fmt.Printf("%s", eval.Inspect(v))
+			if i < size-1 {
+				fmt.Printf(", ")
+			}
+		}
+		fmt.Printf("\n")
+		results = append(results, (*vals))
 	}
 }
 
@@ -136,12 +120,12 @@ func REPL(env *eval.Env) {
 //
 // See make_env in github.com/rocky/go-fish for an automated way to
 // create more complete environment from a starting import.
-func makeBogusEnv() eval.Env {
+func makeEnv() *eval.Env {
 
 	// A copule of things from the fmt package.
-	var fmt_funcs    map[string] reflect.Value = make(map[string] reflect.Value)
+	var fmt_funcs map[string]reflect.Value = make(map[string]reflect.Value)
 	fmt_funcs["Println"] = reflect.ValueOf(fmt.Println)
-	fmt_funcs["Printf"]  = reflect.ValueOf(fmt.Printf)
+	fmt_funcs["Printf"] = reflect.ValueOf(fmt.Printf)
 
 	// A simple type for demo
 	type MyInt int
@@ -149,58 +133,65 @@ func makeBogusEnv() eval.Env {
 	// A stripped down package environment.  See
 	// http://github.com/rocky/go-fish and repl_imports.go for a more
 	// complete environment.
-	pkgs := map[string] eval.Pkg {
-			"fmt": &eval.Env {
-				Name:   "fmt",
-				Path:   "fmt",
-				Vars:   make(map[string] reflect.Value),
-				Consts: make(map[string] reflect.Value),
-				Funcs:  fmt_funcs,
-				Types : make(map[string] reflect.Type),
-				Pkgs:   make(map[string] eval.Pkg),
-			}, "os": &eval.Env {
-				Name:   "os",
-				Path:   "os",
-				Vars:   map[string] reflect.Value {
-					"Stdout": reflect.ValueOf(&os.Stdout),
-					"Args"  : reflect.ValueOf(&os.Args)},
-				Consts: make(map[string] reflect.Value),
-				Funcs:  make(map[string] reflect.Value),
-				Types:  map[string] reflect.Type{
-					"MyInt": reflect.TypeOf(*new(MyInt))},
-				Pkgs:   make(map[string] eval.Pkg),
-			},
-		}
+	pkgs := map[string]eval.Pkg{
+		"fmt": &eval.Env{
+			Name:   "fmt",
+			Path:   "fmt",
+			Vars:   make(map[string]reflect.Value),
+			Consts: make(map[string]reflect.Value),
+			Funcs:  fmt_funcs,
+			Types:  make(map[string]reflect.Type),
+			Pkgs:   make(map[string]eval.Pkg),
+		}, "os": &eval.Env{
+			Name: "os",
+			Path: "os",
+			Vars: map[string]reflect.Value{
+				"Stdout": reflect.ValueOf(&os.Stdout),
+				"Args":   reflect.ValueOf(&os.Args)},
+			Consts: make(map[string]reflect.Value),
+			Funcs:  make(map[string]reflect.Value),
+			Types: map[string]reflect.Type{
+				"MyInt": reflect.TypeOf(*new(MyInt))},
+			Pkgs: make(map[string]eval.Pkg),
+		},
+	}
 
-	mainEnv := eval.Env {
+	mainEnv := eval.Env{
 		Name:   ".",
 		Path:   "",
-		Consts: make(map[string] reflect.Value),
-		Funcs : make(map[string] reflect.Value),
-		Types : make(map[string] reflect.Type),
-		Vars  : make(map[string] reflect.Value),
+		Consts: make(map[string]reflect.Value),
+		Funcs:  make(map[string]reflect.Value),
+		Types:  make(map[string]reflect.Type),
+		Vars:   make(map[string]reflect.Value),
 		Pkgs:   pkgs,
 	}
 
-
 	// Some "alice" things for testing
 	type Alice struct {
-		Bob int
+		Bob    int
 		Secret string
 	}
 
-	alice    := Alice{1, "shhh"}
+	alice := Alice{1, "shhh"}
 	alicePtr := &alice
 
-	mainEnv.Vars["alice"]    = reflect.ValueOf(&alice)
+	mainEnv.Vars["alice"] = reflect.ValueOf(&alice)
 	mainEnv.Vars["alicePtr"] = reflect.ValueOf(&alicePtr)
-	mainEnv.Types["Alice"]   = reflect.TypeOf(Alice{})
+	mainEnv.Types["Alice"] = reflect.TypeOf(Alice{})
 
-	return mainEnv
+	return &mainEnv
 }
 
 func main() {
-	env := makeBogusEnv()
-	intro_text()
-	REPL(&env)
+	env.Vars["results"] = reflect.ValueOf(&results)
+	commander.Init()
+
+	commander.Add(cmd.Command{
+		"exit",
+		`terminate application`,
+		func(string) (stop bool) {
+			return true
+		}})
+
+	commander.CmdLoop()
 }
